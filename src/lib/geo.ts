@@ -17,9 +17,9 @@ export const ITB_CENTER: LatLng = {
   lng: 107.6104,
 };
 
-export const ITB_DEFAULT_ZOOM = 17;
-export const ITB_MIN_ZOOM = 15;
-export const ITB_MAX_ZOOM = 19;
+export const ITB_DEFAULT_ZOOM = 16.5;
+export const ITB_MIN_ZOOM = 14.5;
+export const ITB_MAX_ZOOM = 19.5;
 
 // Generous panning bounds centered on ITB Kampus Ganesha so campus stays in focus
 // while nearby Tamansari / Cisitu / Dago users can still view walking routes in.

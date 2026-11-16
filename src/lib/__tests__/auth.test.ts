@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  canRevokeDbAdmin,
   createSessionToken,
   evaluateAdminAccess,
   generateOAuthState,
@@ -83,5 +84,55 @@ describe("auth core utilities", () => {
     expect(pkce.codeVerifier.length).toBeGreaterThanOrEqual(32);
     expect(pkce.codeChallenge).toBeTruthy();
     expect(pkce.codeChallenge).not.toBe(pkce.codeVerifier);
+  });
+
+  it("enforces ownership and superadmin rules when revoking DB admins", () => {
+    // Super-admin (env) can revoke any DB admin regardless of who added them
+    expect(
+      canRevokeDbAdmin({
+        actorEmail: "owner@gmail.com",
+        actorSource: "env",
+        targetEmail: "teman2@gmail.com",
+        targetAddedBy: "teman1@gmail.com",
+      })
+    ).toBe(true);
+
+    // Regular DB admin CAN revoke an admin they added themselves
+    expect(
+      canRevokeDbAdmin({
+        actorEmail: "Teman1@Gmail.com",
+        actorSource: "db",
+        targetEmail: "teman2@gmail.com",
+        targetAddedBy: "teman1@gmail.com",
+      })
+    ).toBe(true);
+
+    // Regular DB admin CANNOT revoke an admin added by superadmin or someone else
+    expect(
+      canRevokeDbAdmin({
+        actorEmail: "teman1@gmail.com",
+        actorSource: "db",
+        targetEmail: "teman2@gmail.com",
+        targetAddedBy: "owner@gmail.com",
+      })
+    ).toBe(false);
+    expect(
+      canRevokeDbAdmin({
+        actorEmail: "teman1@gmail.com",
+        actorSource: "db",
+        targetEmail: "teman2@gmail.com",
+        targetAddedBy: null,
+      })
+    ).toBe(false);
+
+    // Nobody can revoke their own account
+    expect(
+      canRevokeDbAdmin({
+        actorEmail: "teman1@gmail.com",
+        actorSource: "db",
+        targetEmail: "teman1@gmail.com",
+        targetAddedBy: "teman1@gmail.com",
+      })
+    ).toBe(false);
   });
 });

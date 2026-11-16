@@ -28,6 +28,7 @@ import {
   isWithinItbPinBounds,
 } from "@/lib/geo";
 import { MAX_IMAGE_BYTES } from "@/lib/constants";
+import { canRevokeDbAdmin } from "@/lib/admin-permissions";
 
 const ItbToiletMap = dynamic(() => import("@/components/ItbToiletMap"), {
   ssr: false,
@@ -897,38 +898,54 @@ export default function AdminDashboard({
                     Belum ada admin tambahan yang didaftarkan.
                   </p>
                 ) : (
-                  dbAdmins.map((admin) => (
-                    <div
-                      key={admin.id}
-                      className="px-3.5 py-3 flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-slate-900 truncate">
-                          {admin.email}
-                        </p>
-                        <p className="text-[11px] text-slate-500 truncate">
-                          {admin.name ? `${admin.name} • ` : ""}
-                          Ditambahkan oleh {admin.addedBy || "-"}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteAdmin(admin)}
-                        disabled={
-                          deletingAdminId === admin.id ||
-                          admin.email === currentAdmin.email
-                        }
-                        className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 cursor-pointer"
+                  dbAdmins.map((admin) => {
+                    const isSelf = admin.email === currentAdmin.email;
+                    const canRevoke = canRevokeDbAdmin({
+                      actorEmail: currentAdmin.email,
+                      actorSource: currentAdmin.source,
+                      targetEmail: admin.email,
+                      targetAddedBy: admin.addedBy,
+                    });
+
+                    return (
+                      <div
+                        key={admin.id}
+                        className="px-3.5 py-3 flex items-center justify-between gap-3"
                       >
-                        {deletingAdminId === admin.id ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-900 truncate">
+                            {admin.email}
+                          </p>
+                          <p className="text-[11px] text-slate-500 truncate">
+                            {admin.name ? `${admin.name} • ` : ""}
+                            Ditambahkan oleh {admin.addedBy || "-"}
+                          </p>
+                        </div>
+
+                        {canRevoke ? (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteAdmin(admin)}
+                            disabled={deletingAdminId === admin.id}
+                            className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 cursor-pointer shrink-0"
+                          >
+                            {deletingAdminId === admin.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3 w-3" />
+                            )}
+                            <span>Cabut Akses</span>
+                          </button>
                         ) : (
-                          <Trash2 className="h-3 w-3" />
+                          <span className="rounded-full bg-slate-100 text-slate-600 px-2.5 py-1 text-[10px] font-semibold shrink-0">
+                            {isSelf
+                              ? "Akun Anda"
+                              : "Ditambahkan admin lain"}
+                          </span>
                         )}
-                        <span>Cabut Akses</span>
-                      </button>
-                    </div>
-                  ))
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>

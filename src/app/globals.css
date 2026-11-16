@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "leaflet/dist/leaflet.css";
+@import "maplibre-gl/dist/maplibre-gl.css";
 
 html,
 body {
@@ -8,14 +8,30 @@ body {
   padding: 0;
 }
 
-/* Prevent Tailwind img reset from distorting Leaflet map tiles */
-.leaflet-container img {
-  max-width: none;
-}
-
-.leaflet-container {
+.maplibregl-map {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   background-color: #e2e8f0;
+}
+
+.maplibregl-ctrl-top-right {
+  top: 12px;
+  right: 12px;
+}
+
+.admin-pin-cursor .maplibregl-canvas {
+  cursor: crosshair !important;
+}
+
+.toilet-pin-tooltip {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 2px);
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.toilet-pin-wrap:hover .toilet-pin-tooltip {
+  opacity: 1;
+  transform: translate(-50%, -2px);
 }
 
 /* Custom pulse animation for user GPS indicator */

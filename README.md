@@ -5,7 +5,7 @@ Aplikasi web interaktif untuk memetakan lokasi toilet di lingkungan **ITB Kampus
 ## Fitur Utama
 
 ### Publik (`/`)
-- **Peta Interaktif ITB Kampus Ganesha**: Menampilkan seluruh titik lokasi toilet dengan peta OpenStreetMap.
+- **Peta Interaktif ITB Kampus Ganesha**: Menampilkan seluruh titik lokasi toilet menggunakan peta vektor OpenFreeMap (`MapLibre GL JS`) tanpa membutuhkan API key maupun risiko blokir tile server OSM.
 - **Detail Minimalis Toilet**: Klik pin untuk melihat **nama lokasi**, **koordinat** (dengan tombol salin), dan **foto kondisi terkini** (dapat diperbesar).
 - **Cari Toilet Terdekat**: Jika pengguna mengizinkan akses lokasi (GPS), aplikasi menentukan toilet terdekat, menggambar **rute jalan kaki** di atas peta (`OSRM foot profile` dengan fallback garis lurus otomatis), serta menyediakan tautan **Buka di Google Maps**.
 - **Daftar & Pencarian**: Cari cepat lokasi toilet berdasarkan nama gedung/lokasi.
@@ -14,7 +14,7 @@ Aplikasi web interaktif untuk memetakan lokasi toilet di lingkungan **ITB Kampus
 - **Login Google OAuth 2.0 + PKCE**: Hanya email Google yang terdaftar pada `ADMIN_EMAILS` (`.env`) atau tabel `Admin` di database yang diizinkan masuk.
 - **Endpoint Tersembunyi**: Tidak ditautkan di antarmuka publik, menggunakan `noindex, nofollow`, dan mengembalikan `404` untuk slug lain (seperti `/admin` atau `/login`).
 - **Tandai Titik & Unggah Foto**: Admin dapat klik/geser pin langsung di peta, menggunakan GPS perangkat, atau memasukkan koordinat manual serta mengunggah/mengganti foto kondisi (JPG/PNG/WebP, maks. 5 MB).
-- **Kelola Admin**: Admin utama dapat menambahkan dan mencabut akses akun Google rekan lain langsung dari dashboard.
+- **Kelola Admin**: Admin dapat menambahkan akun Google rekan lain langsung dari dashboard; admin biasa hanya dapat mencabut akses admin yang ia tambahkan sendiri, sedangkan super-admin (`ADMIN_EMAILS`) dapat mencabut akses admin mana pun.
 
 ## Instalasi & Menjalankan Secara Lokal
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getVerifiedAdminSession } from "@/lib/auth";
+import { canRevokeDbAdmin, getVerifiedAdminSession } from "@/lib/auth";
 
 export async function DELETE(
   _request: NextRequest,
@@ -27,6 +27,23 @@ export async function DELETE(
     return NextResponse.json(
       { error: "Anda tidak dapat menghapus akun admin Anda sendiri." },
       { status: 400 }
+    );
+  }
+
+  if (
+    !canRevokeDbAdmin({
+      actorEmail: session.email,
+      actorSource: session.source,
+      targetEmail: target.email,
+      targetAddedBy: target.addedBy,
+    })
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Anda hanya dapat mencabut akses admin yang Anda tambahkan sendiri.",
+      },
+      { status: 403 }
     );
   }
 

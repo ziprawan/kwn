@@ -63,8 +63,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(fallbackPayload);
     }
 
-    // OSRM GeoJSON returns [lng, lat]; Leaflet expects [lat, lng]
-    const leafletCoords: [number, number][] = coords.map(([lng, lat]) => [
+    // OSRM GeoJSON returns [lng, lat]; normalize to [lat, lng] for ToiletPoint / geo helpers
+    const routeCoords: [number, number][] = coords.map(([lng, lat]) => [
       lat,
       lng,
     ]);
@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
         typeof route.distance === "number" ? route.distance : fallbackDistance,
       durationSeconds:
         typeof route.duration === "number" ? route.duration : null,
-      coordinates: leafletCoords,
+      coordinates: routeCoords,
     });
   } catch {
     return NextResponse.json(fallbackPayload);
