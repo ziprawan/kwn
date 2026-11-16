@@ -1,0 +1,39 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Prevent Tailwind img reset from distorting Leaflet map tiles */
+.leaflet-container img {
+  max-width: none;
+}
+
+.leaflet-container {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background-color: #e2e8f0;
+}
+
+/* Custom pulse animation for user GPS indicator */
+@keyframes pulseRing {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.75;
+  }
+  70% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+}
+
+.user-gps-pulse {
+  animation: pulseRing 2s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
