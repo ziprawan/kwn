@@ -5,7 +5,7 @@ Aplikasi web interaktif untuk memetakan lokasi toilet di lingkungan **ITB Kampus
 ## Fitur Utama
 
 ### Publik (`/`)
-- **Peta Interaktif ITB Kampus Ganesha**: Menampilkan seluruh titik lokasi toilet menggunakan peta vektor OpenFreeMap (`MapLibre GL JS`) tanpa membutuhkan API key maupun risiko blokir tile server OSM.
+- **Peta Interaktif ITB Kampus Ganesha**: Menampilkan seluruh titik lokasi toilet dengan peta OpenStreetMap.
 - **Detail Minimalis Toilet**: Klik pin untuk melihat **nama lokasi**, **koordinat** (dengan tombol salin), dan **foto kondisi terkini** (dapat diperbesar).
 - **Cari Toilet Terdekat**: Jika pengguna mengizinkan akses lokasi (GPS), aplikasi menentukan toilet terdekat, menggambar **rute jalan kaki** di atas peta (`OSRM foot profile` dengan fallback garis lurus otomatis), serta menyediakan tautan **Buka di Google Maps**.
 - **Daftar & Pencarian**: Cari cepat lokasi toilet berdasarkan nama gedung/lokasi.
