@@ -13,7 +13,7 @@ Aplikasi web interaktif untuk memetakan lokasi toilet di lingkungan **ITB Kampus
 ### Admin Tersembunyi (`/<ADMIN_PORTAL_SLUG>`, default `/kelola-toilet`)
 - **Login Google OAuth 2.0 + PKCE**: Hanya email Google yang terdaftar pada `ADMIN_EMAILS` (`.env`) atau tabel `Admin` di database yang diizinkan masuk.
 - **Endpoint Tersembunyi**: Tidak ditautkan di antarmuka publik, menggunakan `noindex, nofollow`, dan mengembalikan `404` untuk slug lain (seperti `/admin` atau `/login`).
-- **Tandai Titik & Unggah Foto**: Admin dapat klik/geser pin langsung di peta, menggunakan GPS perangkat, atau memasukkan koordinat manual serta mengunggah/mengganti foto kondisi (JPG/PNG/WebP, maks. 5 MB).
+- **Tandai Titik & Unggah Multi-Foto**: Admin dapat klik/geser pin langsung di peta, menggunakan GPS perangkat, atau memasukkan koordinat manual serta mengunggah lebih dari satu foto kondisi (maks. 10 foto per titik, JPG/PNG/WebP, maks. 5 MB/foto) dan menghapus foto mana pun.
 - **Kelola Admin**: Admin dapat menambahkan akun Google rekan lain langsung dari dashboard; admin biasa hanya dapat mencabut akses admin yang ia tambahkan sendiri, sedangkan super-admin (`ADMIN_EMAILS`) dapat mencabut akses admin mana pun.
 
 ## Instalasi & Menjalankan Secara Lokal

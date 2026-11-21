@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  canDeleteToiletImage,
   canRevokeDbAdmin,
   createSessionToken,
   evaluateAdminAccess,
@@ -134,5 +135,16 @@ describe("auth core utilities", () => {
         targetAddedBy: "teman1@gmail.com",
       })
     ).toBe(false);
+  });
+
+  it("allows any authenticated admin to delete any toilet photo", () => {
+    expect(
+      canDeleteToiletImage({ email: "owner@gmail.com", source: "env" })
+    ).toBe(true);
+    expect(
+      canDeleteToiletImage({ email: "teman1@gmail.com", source: "db" })
+    ).toBe(true);
+    expect(canDeleteToiletImage(null)).toBe(false);
+    expect(canDeleteToiletImage({ email: "   ", source: "db" })).toBe(false);
   });
 });

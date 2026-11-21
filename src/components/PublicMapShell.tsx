@@ -1,9 +1,11 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Check,
+  ChevronLeft,
+  ChevronRight,
   Compass,
   Copy,
   ExternalLink,
@@ -70,10 +72,58 @@ export default function PublicMapShell({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isListOpen, setIsListOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [lightboxImage, setLightboxImage] = useState<{
-    src: string;
-    title: string;
-  } | null>(null);
+  const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+
+  const selectToilet = useCallback((toilet: ToiletPoint | null) => {
+    setSelectedToilet(toilet);
+    setActivePhotoIndex(0);
+    setLightboxIndex(null);
+  }, []);
+
+  const selectedPhotos = useMemo(() => {
+    if (!selectedToilet) return [];
+    if (selectedToilet.images && selectedToilet.images.length > 0) {
+      return selectedToilet.images;
+    }
+    return selectedToilet.imagePath
+      ? [{ id: "cover", imagePath: selectedToilet.imagePath }]
+      : [];
+  }, [selectedToilet]);
+
+  const safePhotoIndex =
+    selectedPhotos.length > 0
+      ? Math.min(activePhotoIndex, selectedPhotos.length - 1)
+      : 0;
+  const activePhoto = selectedPhotos[safePhotoIndex] ?? null;
+
+  const safeLightboxIndex =
+    lightboxIndex !== null && selectedPhotos.length > 0
+      ? Math.min(lightboxIndex, selectedPhotos.length - 1)
+      : null;
+  const lightboxPhoto =
+    safeLightboxIndex !== null ? selectedPhotos[safeLightboxIndex] ?? null : null;
+
+  useEffect(() => {
+    if (safeLightboxIndex === null) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setLightboxIndex(null);
+      } else if (event.key === "ArrowLeft" && selectedPhotos.length > 1) {
+        setLightboxIndex((prev) =>
+          prev === null
+            ? 0
+            : (prev - 1 + selectedPhotos.length) % selectedPhotos.length
+        );
+      } else if (event.key === "ArrowRight" && selectedPhotos.length > 1) {
+        setLightboxIndex((prev) =>
+          prev === null ? 0 : (prev + 1) % selectedPhotos.length
+        );
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [safeLightboxIndex, selectedPhotos.length]);
 
   const filteredToilets = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -184,7 +234,7 @@ export default function PublicMapShell({
       if (!closest) return;
 
       setNearestToiletId(closest.toilet.id);
-      setSelectedToilet(closest.toilet);
+      selectToilet(closest.toilet);
       const route = await fetchWalkingRoute(origin, closest.toilet);
       setActiveRoute(route);
       setIsListOpen(false);
@@ -215,7 +265,7 @@ export default function PublicMapShell({
   };
 
   const handleSelectFromList = (toilet: ToiletPoint) => {
-    setSelectedToilet(toilet);
+    selectToilet(toilet);
     setFocusTarget((prev) => ({
       lat: toilet.latitude,
       lng: toilet.longitude,
@@ -272,7 +322,7 @@ export default function PublicMapShell({
         toilets={toilets}
         selectedToiletId={selectedToilet?.id ?? null}
         nearestToiletId={nearestToiletId}
-        onSelectToilet={(toilet) => setSelectedToilet(toilet)}
+        onSelectToilet={selectToilet}
         userLocation={userLocation}
         routePath={activeRoute?.coordinates ?? null}
         routeMode={activeRoute?.mode ?? null}
@@ -342,37 +392,41 @@ export default function PublicMapShell({
                     : "Tidak ada lokasi yang cocok."}
                 </p>
               ) : (
-                filteredToilets.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => handleSelectFromList(t)}
-                    className={`w-full text-left px-3.5 py-2.5 flex items-center justify-between gap-2 hover:bg-teal-50/60 transition cursor-pointer ${
-                      selectedToilet?.id === t.id ? "bg-teal-50" : ""
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-800 truncate">
-                        {t.name}
-                      </p>
-                      <p className="text-[11px] font-mono text-slate-500">
-                        {formatCoordinates(t.latitude, t.longitude)}
-                      </p>
-                    </div>
-                    {userLocation && (
-                      <span className="text-xs font-semibold text-teal-700 shrink-0">
-                        {formatDistanceId(
-                          haversineMeters(
-                            userLocation.lat,
-                            userLocation.lng,
-                            t.latitude,
-                            t.longitude
-                          )
-                        )}
-                      </span>
-                    )}
-                  </button>
-                ))
+                filteredToilets.map((t) => {
+                  const photoCount = t.images?.length ?? (t.imagePath ? 1 : 0);
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => handleSelectFromList(t)}
+                      className={`w-full text-left px-3.5 py-2.5 flex items-center justify-between gap-2 hover:bg-teal-50/60 transition cursor-pointer ${
+                        selectedToilet?.id === t.id ? "bg-teal-50" : ""
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 truncate">
+                          {t.name}
+                        </p>
+                        <p className="text-[11px] font-mono text-slate-500">
+                          {formatCoordinates(t.latitude, t.longitude)}
+                          {photoCount > 0 ? ` • ${photoCount} foto` : ""}
+                        </p>
+                      </div>
+                      {userLocation && (
+                        <span className="text-xs font-semibold text-teal-700 shrink-0">
+                          {formatDistanceId(
+                            haversineMeters(
+                              userLocation.lat,
+                              userLocation.lng,
+                              t.latitude,
+                              t.longitude
+                            )
+                          )}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })
               )}
             </div>
           </div>
@@ -403,7 +457,11 @@ export default function PublicMapShell({
       {/* Floating Map Controls (Bottom Right) */}
       <div
         className={`fixed right-3 z-[500] flex flex-col items-end gap-2 transition-all ${
-          selectedToilet ? "bottom-[360px] sm:bottom-5" : "bottom-5"
+          selectedToilet
+            ? selectedPhotos.length > 1
+              ? "bottom-[420px] sm:bottom-5"
+              : "bottom-[360px] sm:bottom-5"
+            : "bottom-5"
         }`}
       >
         {activeRoute && (
@@ -444,9 +502,9 @@ export default function PublicMapShell({
         </button>
       </div>
 
-      {/* Minimalist Toilet Detail Card (Coordinates, Name, Condition Photo, Directions) */}
+      {/* Minimalist Toilet Detail Card (Coordinates, Name, Condition Photos, Directions) */}
       {selectedToilet && (
-        <div className="fixed bottom-3 left-3 right-3 sm:right-auto sm:bottom-5 sm:left-4 sm:w-[360px] z-[550] rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden select-text">
+        <div className="fixed bottom-3 left-3 right-3 sm:right-auto sm:bottom-5 sm:left-4 sm:w-[360px] max-h-[78dvh] overflow-y-auto z-[550] rounded-2xl bg-white shadow-2xl border border-slate-200 select-text">
           <div className="p-3.5 sm:p-4">
             {/* Header */}
             <div className="flex items-start justify-between gap-2">
@@ -493,7 +551,7 @@ export default function PublicMapShell({
 
               <button
                 type="button"
-                onClick={() => setSelectedToilet(null)}
+                onClick={() => selectToilet(null)}
                 className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition cursor-pointer"
                 aria-label="Tutup detail toilet"
               >
@@ -501,29 +559,90 @@ export default function PublicMapShell({
               </button>
             </div>
 
-            {/* Condition Image */}
+            {/* Condition Images */}
             <div className="mt-3">
-              {selectedToilet.imagePath ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setLightboxImage({
-                      src: selectedToilet.imagePath!,
-                      title: selectedToilet.name,
-                    })
-                  }
-                  className="group relative w-full h-44 rounded-xl overflow-hidden bg-slate-100 border border-slate-200 block cursor-zoom-in"
-                >
-                  <img
-                    src={selectedToilet.imagePath}
-                    alt={`Kondisi ${selectedToilet.name}`}
-                    className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-200"
-                  />
-                  <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-lg bg-slate-900/75 text-white px-2 py-1 text-[11px] font-medium backdrop-blur-xs">
-                    <ZoomIn className="h-3 w-3" />
-                    Perbesar
-                  </span>
-                </button>
+              {activePhoto ? (
+                <>
+                  <div
+                    className={`relative w-full ${
+                      selectedPhotos.length > 1 ? "h-40" : "h-44"
+                    } rounded-xl overflow-hidden bg-slate-100 border border-slate-200`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setLightboxIndex(safePhotoIndex)}
+                      className="group relative w-full h-full block cursor-zoom-in"
+                      aria-label={`Perbesar foto ${safePhotoIndex + 1} ${selectedToilet.name}`}
+                    >
+                      <img
+                        src={activePhoto.imagePath}
+                        alt={`Kondisi ${selectedToilet.name} (${safePhotoIndex + 1}/${selectedPhotos.length})`}
+                        className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-200"
+                      />
+                      <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-lg bg-slate-900/75 text-white px-2 py-1 text-[11px] font-medium backdrop-blur-xs">
+                        <ZoomIn className="h-3 w-3" />
+                        Perbesar
+                      </span>
+                    </button>
+
+                    {selectedPhotos.length > 1 && (
+                      <>
+                        <span className="pointer-events-none absolute top-2 left-2 rounded-full bg-slate-900/75 px-2 py-0.5 text-[11px] font-semibold text-white backdrop-blur-xs">
+                          {safePhotoIndex + 1} / {selectedPhotos.length}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActivePhotoIndex(
+                              (safePhotoIndex - 1 + selectedPhotos.length) %
+                                selectedPhotos.length
+                            )
+                          }
+                          className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-slate-900/65 hover:bg-slate-900/85 p-1.5 text-white shadow-sm transition cursor-pointer"
+                          aria-label="Foto sebelumnya"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActivePhotoIndex(
+                              (safePhotoIndex + 1) % selectedPhotos.length
+                            )
+                          }
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-slate-900/65 hover:bg-slate-900/85 p-1.5 text-white shadow-sm transition cursor-pointer"
+                          aria-label="Foto berikutnya"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  {selectedPhotos.length > 1 && (
+                    <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5">
+                      {selectedPhotos.map((photo, idx) => (
+                        <button
+                          key={photo.id}
+                          type="button"
+                          onClick={() => setActivePhotoIndex(idx)}
+                          className={`relative h-11 w-14 shrink-0 rounded-lg overflow-hidden border-2 transition cursor-pointer ${
+                            idx === safePhotoIndex
+                              ? "border-teal-600 ring-1 ring-teal-600/30"
+                              : "border-slate-200 opacity-75 hover:opacity-100"
+                          }`}
+                          aria-label={`Lihat foto ${idx + 1}`}
+                        >
+                          <img
+                            src={photo.imagePath}
+                            alt={`${selectedToilet.name} thumbnail ${idx + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="w-full h-32 rounded-xl bg-slate-100 border border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 gap-1.5">
                   <ImageOff className="h-5 w-5" />
@@ -584,33 +703,98 @@ export default function PublicMapShell({
       )}
 
       {/* Fullscreen Condition Photo Lightbox */}
-      {lightboxImage && (
+      {selectedToilet && lightboxPhoto && safeLightboxIndex !== null && (
         <div
           className="fixed inset-0 z-[1000] bg-slate-950/90 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setLightboxImage(null)}
+          onClick={() => setLightboxIndex(null)}
         >
           <div
             className="relative max-w-3xl w-full flex flex-col items-center gap-3"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="w-full flex items-center justify-between text-white">
-              <p className="text-sm font-semibold truncate pr-4">
-                {lightboxImage.title}
-              </p>
+              <div className="min-w-0 pr-4">
+                <p className="text-sm font-semibold truncate">
+                  {selectedToilet.name}
+                </p>
+                {selectedPhotos.length > 1 && (
+                  <p className="text-xs text-slate-300">
+                    Foto {safeLightboxIndex + 1} dari {selectedPhotos.length}
+                  </p>
+                )}
+              </div>
               <button
                 type="button"
-                onClick={() => setLightboxImage(null)}
+                onClick={() => setLightboxIndex(null)}
                 className="rounded-full bg-white/15 hover:bg-white/25 p-2 text-white cursor-pointer"
                 aria-label="Tutup foto"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <img
-              src={lightboxImage.src}
-              alt={lightboxImage.title}
-              className="max-h-[80dvh] w-auto rounded-xl object-contain shadow-2xl border border-white/10"
-            />
+
+            <div className="relative w-full flex items-center justify-center">
+              {selectedPhotos.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setLightboxIndex(
+                      (safeLightboxIndex - 1 + selectedPhotos.length) %
+                        selectedPhotos.length
+                    )
+                  }
+                  className="absolute left-2 z-10 rounded-full bg-slate-900/75 hover:bg-slate-900 p-2 text-white border border-white/15 cursor-pointer"
+                  aria-label="Foto sebelumnya"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+              )}
+
+              <img
+                src={lightboxPhoto.imagePath}
+                alt={`${selectedToilet.name} (${safeLightboxIndex + 1})`}
+                className="max-h-[75dvh] w-auto rounded-xl object-contain shadow-2xl border border-white/10"
+              />
+
+              {selectedPhotos.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setLightboxIndex(
+                      (safeLightboxIndex + 1) % selectedPhotos.length
+                    )
+                  }
+                  className="absolute right-2 z-10 rounded-full bg-slate-900/75 hover:bg-slate-900 p-2 text-white border border-white/15 cursor-pointer"
+                  aria-label="Foto berikutnya"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              )}
+            </div>
+
+            {selectedPhotos.length > 1 && (
+              <div className="flex items-center gap-2 overflow-x-auto max-w-full py-1">
+                {selectedPhotos.map((photo, idx) => (
+                  <button
+                    key={photo.id}
+                    type="button"
+                    onClick={() => setLightboxIndex(idx)}
+                    className={`h-12 w-16 shrink-0 rounded-lg overflow-hidden border-2 transition cursor-pointer ${
+                      idx === safeLightboxIndex
+                        ? "border-teal-400"
+                        : "border-white/20 opacity-60 hover:opacity-100"
+                    }`}
+                    aria-label={`Pilih foto ${idx + 1}`}
+                  >
+                    <img
+                      src={photo.imagePath}
+                      alt={`${selectedToilet.name} preview ${idx + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

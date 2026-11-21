@@ -1,23 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getVerifiedAdminSession } from "@/lib/auth";
+import { MAX_IMAGES_PER_TOILET } from "@/lib/constants";
 import { isWithinItbPinBounds } from "@/lib/geo";
-import { deleteUploadByUrl, saveUploadedImage } from "@/lib/uploads";
+import {
+  TOILET_ADMIN_SELECT,
+  TOILET_PUBLIC_SELECT,
+  extractUploadedImageFiles,
+  serializeToilet,
+} from "@/lib/toilets";
+import { deleteUploadsByUrls, saveUploadedImages } from "@/lib/uploads";
 
 export async function GET() {
   try {
     const toilets = await prisma.toilet.findMany({
       orderBy: [{ name: "asc" }, { createdAt: "desc" }],
-      select: {
-        id: true,
-        name: true,
-        latitude: true,
-        longitude: true,
-        imagePath: true,
-        updatedAt: true,
-      },
+      select: TOILET_PUBLIC_SELECT,
     });
-    return NextResponse.json({ toilets });
+    return NextResponse.json({ toilets: toilets.map(serializeToilet) });
   } catch (err) {
     console.error("GET /api/toilets failed:", err);
     return NextResponse.json(
@@ -36,14 +36,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let savedImagePath: string | null = null;
+  let savedImagePaths: string[] = [];
 
   try {
     const formData = await request.formData();
     const rawName = String(formData.get("name") ?? "").trim();
     const rawLat = Number(formData.get("latitude"));
     const rawLng = Number(formData.get("longitude"));
-    const imageEntry = formData.get("image");
+    const uploadedFiles = extractUploadedImageFiles(formData);
 
     if (!rawName || rawName.length > 120) {
       return NextResponse.json(
@@ -62,9 +62,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (imageEntry instanceof File && imageEntry.size > 0) {
+    if (uploadedFiles.length > MAX_IMAGES_PER_TOILET) {
+      return NextResponse.json(
+        {
+          error: `Maksimal ${MAX_IMAGES_PER_TOILET} foto per titik toilet.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    if (uploadedFiles.length > 0) {
       try {
-        savedImagePath = await saveUploadedImage(imageEntry);
+        savedImagePaths = await saveUploadedImages(uploadedFiles);
       } catch (uploadError) {
         return NextResponse.json(
           {
@@ -78,28 +87,35 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const nowMs = Date.now();
     const toilet = await prisma.toilet.create({
       data: {
         name: rawName,
         latitude: rawLat,
         longitude: rawLng,
-        imagePath: savedImagePath,
+        imagePath: savedImagePaths[0] ?? null,
         updatedByEmail: session.email,
+        images:
+          savedImagePaths.length > 0
+            ? {
+                create: savedImagePaths.map((imagePath, idx) => ({
+                  imagePath,
+                  uploadedByEmail: session.email,
+                  createdAt: new Date(nowMs + idx),
+                })),
+              }
+            : undefined,
       },
-      select: {
-        id: true,
-        name: true,
-        latitude: true,
-        longitude: true,
-        imagePath: true,
-        updatedAt: true,
-      },
+      select: TOILET_ADMIN_SELECT,
     });
 
-    return NextResponse.json({ toilet }, { status: 201 });
+    return NextResponse.json(
+      { toilet: serializeToilet(toilet) },
+      { status: 201 }
+    );
   } catch (err) {
-    if (savedImagePath) {
-      await deleteUploadByUrl(savedImagePath).catch(() => {});
+    if (savedImagePaths.length > 0) {
+      await deleteUploadsByUrls(savedImagePaths);
     }
     console.error("POST /api/toilets failed:", err);
     return NextResponse.json(

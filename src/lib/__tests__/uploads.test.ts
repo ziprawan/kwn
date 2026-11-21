@@ -4,9 +4,11 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   deleteUploadByUrl,
+  deleteUploadsByUrls,
   detectImageFormat,
   resolveSafeUploadPath,
   saveUploadedImage,
+  saveUploadedImages,
 } from "@/lib/uploads";
 
 const PNG_HEADER = new Uint8Array([
@@ -86,5 +88,41 @@ describe("upload validation & storage", () => {
     await expect(saveUploadedImage(fakeFile)).rejects.toThrow(
       /JPG, PNG, atau WebP/
     );
+  });
+
+  it("saves multiple valid images and deletes them all cleanly", async () => {
+    const files = [
+      new File([PNG_HEADER], "a.png", { type: "image/png" }),
+      new File([JPEG_HEADER], "b.jpg", { type: "image/jpeg" }),
+      new File([WEBP_HEADER], "c.webp", { type: "image/webp" }),
+    ];
+    const urls = await saveUploadedImages(files);
+    expect(urls).toHaveLength(3);
+    expect(urls[0]).toMatch(/\.png$/);
+    expect(urls[1]).toMatch(/\.jpg$/);
+    expect(urls[2]).toMatch(/\.webp$/);
+
+    for (const url of urls) {
+      const filename = url.replace("/api/uploads/", "");
+      const stat = await fs.stat(path.join(tmpDir, filename));
+      expect(stat.size).toBeGreaterThan(0);
+    }
+
+    await deleteUploadsByUrls(urls);
+    const remaining = await fs.readdir(tmpDir);
+    expect(remaining).toHaveLength(0);
+  });
+
+  it("writes no files when any file in a multi-upload batch is invalid", async () => {
+    const files = [
+      new File([PNG_HEADER], "valid.png", { type: "image/png" }),
+      new File(["malicious"], "fake.jpg", { type: "image/jpeg" }),
+    ];
+
+    await expect(saveUploadedImages(files)).rejects.toThrow(
+      /JPG, PNG, atau WebP/
+    );
+    const filesInDir = await fs.readdir(tmpDir).catch(() => []);
+    expect(filesInDir).toHaveLength(0);
   });
 });

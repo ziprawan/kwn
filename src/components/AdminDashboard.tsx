@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -23,11 +23,12 @@ import {
 import {
   ITB_CENTER,
   LatLng,
+  ToiletImageItem,
   ToiletPoint,
   formatCoordinates,
   isWithinItbPinBounds,
 } from "@/lib/geo";
-import { MAX_IMAGE_BYTES } from "@/lib/constants";
+import { MAX_IMAGE_BYTES, MAX_IMAGES_PER_TOILET } from "@/lib/constants";
 import { canRevokeDbAdmin } from "@/lib/admin-permissions";
 
 const ItbToiletMap = dynamic(() => import("@/components/ItbToiletMap"), {
@@ -46,6 +47,12 @@ export interface DbAdminItem {
   name: string | null;
   addedBy: string | null;
   createdAt: string;
+}
+
+interface DraftUploadItem {
+  id: string;
+  file: File;
+  previewUrl: string;
 }
 
 interface AdminDashboardProps {
@@ -75,10 +82,10 @@ export default function AdminDashboard({
   const [nameInput, setNameInput] = useState("");
   const [latInput, setLatInput] = useState(String(ITB_CENTER.lat));
   const [lngInput, setLngInput] = useState(String(ITB_CENTER.lng));
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [existingImageUrl, setExistingImageUrl] = useState<string | null>(null);
-  const [removeCurrentImage, setRemoveCurrentImage] = useState(false);
+  const [draftFiles, setDraftFiles] = useState<DraftUploadItem[]>([]);
+  const [existingImages, setExistingImages] = useState<ToiletImageItem[]>([]);
+  const [confirmDeleteImageId, setConfirmDeleteImageId] = useState<string | null>(null);
+  const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
 
   const [isSavingToilet, setIsSavingToilet] = useState(false);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
@@ -106,13 +113,17 @@ export default function AdminDashboard({
     text: string;
   } | null>(null);
 
+  const createdPreviewUrlsRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
+    const urls = createdPreviewUrlsRef.current;
     return () => {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
+      for (const url of urls) {
+        URL.revokeObjectURL(url);
       }
+      urls.clear();
     };
-  }, [previewUrl]);
+  }, []);
 
   const draftPosition: LatLng | null = useMemo(() => {
     const lat = Number(latInput);
@@ -127,18 +138,24 @@ export default function AdminDashboard({
     return toilets.filter((t) => t.name.toLowerCase().includes(q));
   }, [toilets, searchQuery]);
 
+  const clearDraftFiles = () => {
+    setDraftFiles((prev) => {
+      for (const item of prev) {
+        URL.revokeObjectURL(item.previewUrl);
+        createdPreviewUrlsRef.current.delete(item.previewUrl);
+      }
+      return [];
+    });
+  };
+
   const resetToiletForm = () => {
     setEditingToiletId(null);
     setNameInput("");
     setLatInput(String(ITB_CENTER.lat));
     setLngInput(String(ITB_CENTER.lng));
-    setSelectedFile(null);
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(null);
-    }
-    setExistingImageUrl(null);
-    setRemoveCurrentImage(false);
+    clearDraftFiles();
+    setExistingImages([]);
+    setConfirmDeleteImageId(null);
     setConfirmDeleteId(null);
   };
 
@@ -147,13 +164,9 @@ export default function AdminDashboard({
     setNameInput(toilet.name);
     setLatInput(String(toilet.latitude));
     setLngInput(String(toilet.longitude));
-    setSelectedFile(null);
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(null);
-    }
-    setExistingImageUrl(toilet.imagePath);
-    setRemoveCurrentImage(false);
+    clearDraftFiles();
+    setExistingImages(toilet.images ?? []);
+    setConfirmDeleteImageId(null);
     setConfirmDeleteId(null);
     setToiletFeedback(null);
     setActiveTab("toilets");
@@ -210,26 +223,122 @@ export default function AdminDashboard({
     );
   };
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null;
-    if (!file) return;
+  const handleFilesChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const incoming = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (incoming.length === 0) return;
 
-    if (file.size > MAX_IMAGE_BYTES) {
+    const remainingSlots =
+      MAX_IMAGES_PER_TOILET - existingImages.length - draftFiles.length;
+    if (remainingSlots <= 0) {
       setToiletFeedback({
         type: "error",
-        text: "Ukuran foto terlalu besar (maksimal 5 MB).",
+        text: `Maksimal ${MAX_IMAGES_PER_TOILET} foto per titik toilet.`,
       });
-      event.target.value = "";
       return;
     }
 
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
+    const oversizedNames: string[] = [];
+    const validFiles: File[] = [];
+    for (const file of incoming) {
+      if (file.size <= 0) continue;
+      if (file.size > MAX_IMAGE_BYTES) {
+        oversizedNames.push(file.name);
+        continue;
+      }
+      validFiles.push(file);
     }
-    setSelectedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
-    setRemoveCurrentImage(false);
+
+    const acceptedFiles = validFiles.slice(0, remainingSlots);
+    const exceededLimit = validFiles.length > remainingSlots;
+
+    if (acceptedFiles.length > 0) {
+      const nextItems: DraftUploadItem[] = acceptedFiles.map((file, idx) => {
+        const previewUrl = URL.createObjectURL(file);
+        createdPreviewUrlsRef.current.add(previewUrl);
+        return {
+          id: `${Date.now()}-${idx}-${Math.random().toString(36).slice(2)}`,
+          file,
+          previewUrl,
+        };
+      });
+      setDraftFiles((prev) => [...prev, ...nextItems]);
+    }
+
+    if (oversizedNames.length > 0 || exceededLimit) {
+      const reasons: string[] = [];
+      if (oversizedNames.length > 0) {
+        reasons.push(
+          `Ukuran melebihi 5 MB: ${oversizedNames.slice(0, 3).join(", ")}${oversizedNames.length > 3 ? "..." : ""}`
+        );
+      }
+      if (exceededLimit) {
+        reasons.push(
+          `Maksimal ${MAX_IMAGES_PER_TOILET} foto per titik toilet (sebagian file tidak ditambahkan)`
+        );
+      }
+      setToiletFeedback({
+        type: "error",
+        text: `${reasons.join(". ")}.`,
+      });
+    } else {
+      setToiletFeedback(null);
+    }
+  };
+
+  const handleRemoveDraftFile = (draftId: string) => {
+    setDraftFiles((prev) => {
+      const target = prev.find((item) => item.id === draftId);
+      if (target) {
+        URL.revokeObjectURL(target.previewUrl);
+        createdPreviewUrlsRef.current.delete(target.previewUrl);
+      }
+      return prev.filter((item) => item.id !== draftId);
+    });
+  };
+
+  const handleDeleteExistingImage = async (imageId: string) => {
+    if (!editingToiletId) return;
+    setDeletingImageId(imageId);
     setToiletFeedback(null);
+
+    try {
+      const res = await fetch(
+        `/api/toilets/${editingToiletId}/images/${encodeURIComponent(imageId)}`,
+        { method: "DELETE" }
+      );
+      const data = (await res.json()) as {
+        ok?: boolean;
+        toilet?: ToiletPoint;
+        error?: string;
+      };
+
+      if (!res.ok || !data.toilet) {
+        setToiletFeedback({
+          type: "error",
+          text: data.error || "Gagal menghapus foto toilet.",
+        });
+        return;
+      }
+
+      const updated = data.toilet;
+      setToilets((prev) =>
+        prev.map((item) => (item.id === updated.id ? updated : item))
+      );
+      setExistingImages(updated.images ?? []);
+      setConfirmDeleteImageId(null);
+      setToiletFeedback({
+        type: "success",
+        text: "Foto kondisi berhasil dihapus.",
+      });
+    } catch {
+      setToiletFeedback({
+        type: "error",
+        text: "Terjadi gangguan jaringan saat menghapus foto.",
+      });
+    } finally {
+      setDeletingImageId(null);
+    }
   };
 
   const handleSaveToilet = async (event: React.FormEvent) => {
@@ -256,15 +365,20 @@ export default function AdminDashboard({
       return;
     }
 
+    if (existingImages.length + draftFiles.length > MAX_IMAGES_PER_TOILET) {
+      setToiletFeedback({
+        type: "error",
+        text: `Maksimal ${MAX_IMAGES_PER_TOILET} foto per titik toilet.`,
+      });
+      return;
+    }
+
     const formData = new FormData();
     formData.append("name", trimmedName);
     formData.append("latitude", String(lat));
     formData.append("longitude", String(lng));
-    if (selectedFile) {
-      formData.append("image", selectedFile);
-    }
-    if (editingToiletId && removeCurrentImage && !selectedFile) {
-      formData.append("removeImage", "true");
+    for (const item of draftFiles) {
+      formData.append("images", item.file);
     }
 
     setIsSavingToilet(true);
@@ -293,11 +407,17 @@ export default function AdminDashboard({
         setToilets((prev) =>
           prev.map((item) => (item.id === saved.id ? saved : item))
         );
+        setNameInput(saved.name);
+        setLatInput(String(saved.latitude));
+        setLngInput(String(saved.longitude));
+        setExistingImages(saved.images ?? []);
+        clearDraftFiles();
+        setConfirmDeleteImageId(null);
+        setConfirmDeleteId(null);
         setToiletFeedback({
           type: "success",
           text: `Titik "${saved.name}" berhasil diperbarui.`,
         });
-        startEditingToilet(saved);
       } else {
         setToilets((prev) => [saved, ...prev]);
         resetToiletForm();
@@ -438,8 +558,8 @@ export default function AdminDashboard({
     window.location.reload();
   };
 
-  const activePhotoPreview =
-    previewUrl ?? (!removeCurrentImage ? existingImageUrl : null);
+  const totalPhotoCount = existingImages.length + draftFiles.length;
+  const isAtPhotoLimit = totalPhotoCount >= MAX_IMAGES_PER_TOILET;
 
   return (
     <div className="min-h-dvh flex flex-col bg-slate-100">
@@ -638,50 +758,154 @@ export default function AdminDashboard({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Foto Kondisi Terkini (JPG / PNG / WebP, maks. 5 MB)
-                </label>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Foto Kondisi Terkini (maks. {MAX_IMAGES_PER_TOILET} foto)
+                  </label>
+                  <span className="text-[11px] font-medium text-slate-500">
+                    {totalPhotoCount}/{MAX_IMAGES_PER_TOILET}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mb-2">
+                  JPG / PNG / WebP, maks. 5 MB per foto. Semua admin dapat menghapus foto.
+                </p>
 
-                {activePhotoPreview && (
-                  <div className="relative mb-2 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 h-40">
-                    <img
-                      src={activePhotoPreview}
-                      alt="Pratinjau foto kondisi toilet"
-                      className="w-full h-full object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (previewUrl) {
-                          URL.revokeObjectURL(previewUrl);
-                          setPreviewUrl(null);
-                        }
-                        setSelectedFile(null);
-                        if (existingImageUrl) {
-                          setRemoveCurrentImage(true);
-                        }
-                      }}
-                      className="absolute top-2 right-2 rounded-lg bg-slate-900/75 hover:bg-slate-900 text-white px-2 py-1 text-[11px] font-medium inline-flex items-center gap-1 cursor-pointer"
-                    >
-                      <X className="h-3 w-3" />
-                      <span>Hapus Foto</span>
-                    </button>
+                {editingToiletId && existingImages.length > 0 && (
+                  <div className="mb-2.5">
+                    <p className="text-[11px] font-semibold text-slate-600 mb-1.5">
+                      Foto Tersimpan ({existingImages.length})
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {existingImages.map((img, index) => (
+                        <div
+                          key={img.id}
+                          className="relative h-28 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 group"
+                          title={
+                            img.uploadedByEmail
+                              ? `Diunggah oleh ${img.uploadedByEmail}`
+                              : `Foto ${index + 1}`
+                          }
+                        >
+                          <img
+                            src={img.imagePath}
+                            alt={`Foto kondisi tersimpan ${index + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+
+                          {confirmDeleteImageId === img.id ? (
+                            <div className="absolute inset-0 bg-slate-950/75 flex flex-col items-center justify-center gap-1.5 p-2 text-center">
+                              <span className="text-[11px] font-semibold text-white">
+                                Hapus foto ini?
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteExistingImage(img.id)}
+                                  disabled={deletingImageId === img.id}
+                                  className="inline-flex items-center gap-1 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-60 px-2.5 py-1 text-[11px] font-semibold text-white cursor-pointer"
+                                >
+                                  {deletingImageId === img.id && (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  )}
+                                  <span>Ya</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteImageId(null)}
+                                  disabled={deletingImageId === img.id}
+                                  className="rounded-lg bg-white/90 hover:bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-800 cursor-pointer"
+                                >
+                                  Batal
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteImageId(img.id)}
+                              className="absolute top-1.5 right-1.5 rounded-lg bg-slate-900/75 hover:bg-rose-600 text-white p-1.5 shadow-xs transition cursor-pointer"
+                              aria-label={`Hapus foto ${index + 1}`}
+                              title="Hapus foto"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+
+                          {img.uploadedByEmail && (
+                            <span className="absolute bottom-1.5 left-1.5 max-w-[calc(100%-12px)] truncate rounded-md bg-slate-900/70 px-1.5 py-0.5 text-[10px] text-white/95">
+                              {img.uploadedByEmail}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
-                <label className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 hover:border-teal-600 bg-slate-50 hover:bg-teal-50/40 px-4 py-3 text-xs font-semibold text-slate-700 transition cursor-pointer">
+                {draftFiles.length > 0 && (
+                  <div className="mb-2.5">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-[11px] font-semibold text-teal-800">
+                        Siap Diunggah ({draftFiles.length})
+                      </p>
+                      <button
+                        type="button"
+                        onClick={clearDraftFiles}
+                        className="text-[11px] font-medium text-slate-500 hover:text-rose-700 cursor-pointer"
+                      >
+                        Hapus antrean
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {draftFiles.map((item) => (
+                        <div
+                          key={item.id}
+                          className="relative h-28 rounded-xl overflow-hidden border border-teal-200 bg-teal-50/40"
+                        >
+                          <img
+                            src={item.previewUrl}
+                            alt={item.file.name}
+                            className="w-full h-full object-cover"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDraftFile(item.id)}
+                            className="absolute top-1.5 right-1.5 rounded-lg bg-slate-900/75 hover:bg-slate-900 text-white p-1 transition cursor-pointer"
+                            aria-label={`Batalkan ${item.file.name}`}
+                            title="Hapus dari antrean"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                          <span className="absolute bottom-1.5 left-1.5 max-w-[calc(100%-12px)] truncate rounded-md bg-slate-900/70 px-1.5 py-0.5 text-[10px] text-white">
+                            {item.file.name}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <label
+                  className={`flex items-center justify-center gap-2 rounded-xl border border-dashed px-4 py-3 text-xs font-semibold transition ${
+                    isAtPhotoLimit
+                      ? "border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed"
+                      : "border-slate-300 hover:border-teal-600 bg-slate-50 hover:bg-teal-50/40 text-slate-700 cursor-pointer"
+                  }`}
+                >
                   <ImagePlus className="h-4 w-4 text-teal-700" />
                   <span>
-                    {selectedFile
-                      ? selectedFile.name
-                      : activePhotoPreview
-                        ? "Ganti Foto Kondisi"
-                        : "Pilih / Ambil Foto Kondisi"}
+                    {isAtPhotoLimit
+                      ? `Batas maksimal ${MAX_IMAGES_PER_TOILET} foto tercapai`
+                      : totalPhotoCount > 0
+                        ? "Tambah Foto Lagi (Bisa Pilih > 1)"
+                        : "Pilih / Ambil Foto Kondisi (Bisa > 1)"}
                   </span>
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
-                    onChange={handleFileChange}
+                    multiple
+                    disabled={isAtPhotoLimit}
+                    onChange={handleFilesChange}
                     className="hidden"
                   />
                 </label>
@@ -756,39 +980,51 @@ export default function AdminDashboard({
                     menambah titik pertama.
                   </p>
                 ) : (
-                  filteredToilets.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => startEditingToilet(t)}
-                      className={`w-full text-left rounded-xl border p-2.5 flex items-center gap-3 transition cursor-pointer ${
-                        editingToiletId === t.id
-                          ? "border-teal-600 bg-teal-50/70"
-                          : "border-slate-200 hover:bg-slate-50"
-                      }`}
-                    >
-                      {t.imagePath ? (
-                        <img
-                          src={t.imagePath}
-                          alt={t.name}
-                          className="h-11 w-14 rounded-lg object-cover bg-slate-100 shrink-0 border border-slate-200"
-                        />
-                      ) : (
-                        <div className="h-11 w-14 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0 text-[10px]">
-                          No Foto
+                  filteredToilets.map((t) => {
+                    const photoCount = t.images?.length ?? (t.imagePath ? 1 : 0);
+                    const coverUrl = t.images?.[0]?.imagePath ?? t.imagePath;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => startEditingToilet(t)}
+                        className={`w-full text-left rounded-xl border p-2.5 flex items-center gap-3 transition cursor-pointer ${
+                          editingToiletId === t.id
+                            ? "border-teal-600 bg-teal-50/70"
+                            : "border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        {coverUrl ? (
+                          <div className="relative h-11 w-14 shrink-0">
+                            <img
+                              src={coverUrl}
+                              alt={t.name}
+                              className="h-full w-full rounded-lg object-cover bg-slate-100 border border-slate-200"
+                            />
+                            {photoCount > 1 && (
+                              <span className="absolute bottom-0.5 right-0.5 rounded bg-slate-900/80 px-1 py-0.5 leading-none text-[9px] font-bold text-white">
+                                +{photoCount - 1}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="h-11 w-14 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0 text-[10px]">
+                            No Foto
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-slate-900 truncate">
+                            {t.name}
+                          </p>
+                          <p className="text-[11px] font-mono text-slate-500">
+                            {formatCoordinates(t.latitude, t.longitude)}
+                            {photoCount > 0 ? ` • ${photoCount} foto` : ""}
+                          </p>
                         </div>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-bold text-slate-900 truncate">
-                          {t.name}
-                        </p>
-                        <p className="text-[11px] font-mono text-slate-500">
-                          {formatCoordinates(t.latitude, t.longitude)}
-                        </p>
-                      </div>
-                      <Pencil className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                    </button>
-                  ))
+                        <Pencil className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                      </button>
+                    );
+                  })
                 )}
               </div>
             </div>

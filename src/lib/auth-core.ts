@@ -2,10 +2,11 @@ import crypto from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import {
   type AdminSource,
+  canDeleteToiletImage,
   canRevokeDbAdmin,
 } from "@/lib/admin-permissions";
 
-export { type AdminSource, canRevokeDbAdmin };
+export { type AdminSource, canDeleteToiletImage, canRevokeDbAdmin };
 
 export const SESSION_COOKIE_NAME = "itb_toilet_session";
 export const OAUTH_STATE_COOKIE_NAME = "itb_toilet_oauth_state";

@@ -27,3 +27,14 @@ export function canRevokeDbAdmin({
   const normalizedAddedBy = targetAddedBy?.trim().toLowerCase() || "";
   return normalizedAddedBy.length > 0 && normalizedAddedBy === normalizedActor;
 }
+
+/**
+ * Policy for deleting toilet condition photos:
+ * Currently, any authenticated admin (super-admin or DB admin) may delete any photo
+ * regardless of who uploaded it.
+ */
+export function canDeleteToiletImage(
+  session: { email: string; source: AdminSource } | null | undefined
+): boolean {
+  return Boolean(session?.email?.trim());
+}

@@ -8,14 +8,26 @@ generator client {
 }
 
 model Toilet {
-  id             String   @id @default(cuid())
+  id             String        @id @default(cuid())
   name           String
   latitude       Float
   longitude      Float
   imagePath      String?
   updatedByEmail String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  images         ToiletImage[]
+}
+
+model ToiletImage {
+  id              String   @id @default(cuid())
+  toiletId        String
+  toilet          Toilet   @relation(fields: [toiletId], references: [id], onDelete: Cascade)
+  imagePath       String
+  uploadedByEmail String?
+  createdAt       DateTime @default(now())
+
+  @@index([toiletId])
 }
 
 model Admin {

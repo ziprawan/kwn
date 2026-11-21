@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getVerifiedAdminSession } from "@/lib/auth";
+import { canDeleteToiletImage, getVerifiedAdminSession } from "@/lib/auth";
+import { MAX_IMAGES_PER_TOILET } from "@/lib/constants";
 import { isWithinItbPinBounds } from "@/lib/geo";
-import { deleteUploadByUrl, saveUploadedImage } from "@/lib/uploads";
+import {
+  TOILET_ADMIN_SELECT,
+  collectToiletUploadUrls,
+  extractUploadedImageFiles,
+  getLegacyImageId,
+  parseDeleteImageIds,
+  serializeToilet,
+} from "@/lib/toilets";
+import { deleteUploadsByUrls, saveUploadedImages } from "@/lib/uploads";
 
 export async function PATCH(
   request: NextRequest,
@@ -17,7 +26,10 @@ export async function PATCH(
   }
 
   const { id } = await context.params;
-  const existing = await prisma.toilet.findUnique({ where: { id } });
+  const existing = await prisma.toilet.findUnique({
+    where: { id },
+    select: TOILET_ADMIN_SELECT,
+  });
   if (!existing) {
     return NextResponse.json(
       { error: "Data toilet tidak ditemukan." },
@@ -25,15 +37,23 @@ export async function PATCH(
     );
   }
 
-  let newlySavedImagePath: string | null = null;
+  let newlySavedImagePaths: string[] = [];
 
   try {
     const formData = await request.formData();
     const hasName = formData.has("name");
     const hasLat = formData.has("latitude");
     const hasLng = formData.has("longitude");
-    const removeImage = formData.get("removeImage") === "true";
-    const imageEntry = formData.get("image");
+    const removeAllImages = formData.get("removeImage") === "true";
+    const deleteIds = new Set(parseDeleteImageIds(formData));
+    const uploadedFiles = extractUploadedImageFiles(formData);
+
+    if ((removeAllImages || deleteIds.size > 0) && !canDeleteToiletImage(session)) {
+      return NextResponse.json(
+        { error: "Anda tidak memiliki izin untuk menghapus foto toilet." },
+        { status: 403 }
+      );
+    }
 
     const nextName = hasName
       ? String(formData.get("name") ?? "").trim()
@@ -62,12 +82,36 @@ export async function PATCH(
       );
     }
 
-    let nextImagePath = existing.imagePath;
+    const hasLegacyOnly =
+      existing.images.length === 0 && Boolean(existing.imagePath);
+    const deleteLegacy =
+      hasLegacyOnly &&
+      (removeAllImages ||
+        deleteIds.has("legacy") ||
+        deleteIds.has(getLegacyImageId(id)));
 
-    if (imageEntry instanceof File && imageEntry.size > 0) {
+    const deletedExistingImages = removeAllImages
+      ? existing.images
+      : existing.images.filter((img) => deleteIds.has(img.id));
+    const survivingExistingImages = removeAllImages
+      ? []
+      : existing.images.filter((img) => !deleteIds.has(img.id));
+
+    const survivingCount =
+      survivingExistingImages.length + (hasLegacyOnly && !deleteLegacy ? 1 : 0);
+
+    if (survivingCount + uploadedFiles.length > MAX_IMAGES_PER_TOILET) {
+      return NextResponse.json(
+        {
+          error: `Maksimal ${MAX_IMAGES_PER_TOILET} foto per titik toilet.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    if (uploadedFiles.length > 0) {
       try {
-        newlySavedImagePath = await saveUploadedImage(imageEntry);
-        nextImagePath = newlySavedImagePath;
+        newlySavedImagePaths = await saveUploadedImages(uploadedFiles);
       } catch (uploadError) {
         return NextResponse.json(
           {
@@ -79,41 +123,77 @@ export async function PATCH(
           { status: 400 }
         );
       }
-    } else if (removeImage) {
-      nextImagePath = null;
     }
 
-    const updated = await prisma.toilet.update({
-      where: { id },
-      data: {
-        name: nextName,
-        latitude: nextLat,
-        longitude: nextLng,
-        imagePath: nextImagePath,
-        updatedByEmail: session.email,
-      },
-      select: {
-        id: true,
-        name: true,
-        latitude: true,
-        longitude: true,
-        imagePath: true,
-        updatedAt: true,
-      },
+    const updated = await prisma.$transaction(async (tx) => {
+      if (deletedExistingImages.length > 0) {
+        await tx.toiletImage.deleteMany({
+          where: {
+            toiletId: id,
+            id: { in: deletedExistingImages.map((img) => img.id) },
+          },
+        });
+      }
+
+      const nowMs = Date.now();
+      if (hasLegacyOnly && !deleteLegacy && existing.imagePath && newlySavedImagePaths.length > 0) {
+        await tx.toiletImage.create({
+          data: {
+            toiletId: id,
+            imagePath: existing.imagePath,
+            uploadedByEmail: existing.updatedByEmail,
+            createdAt: new Date(nowMs),
+          },
+        });
+      }
+
+      for (const [idx, imagePath] of newlySavedImagePaths.entries()) {
+        await tx.toiletImage.create({
+          data: {
+            toiletId: id,
+            imagePath,
+            uploadedByEmail: session.email,
+            createdAt: new Date(nowMs + 1 + idx),
+          },
+        });
+      }
+
+      const remainingRows = await tx.toiletImage.findMany({
+        where: { toiletId: id },
+        orderBy: { createdAt: "asc" },
+        select: { imagePath: true },
+      });
+
+      const nextCoverImagePath =
+        remainingRows[0]?.imagePath ??
+        (hasLegacyOnly && !deleteLegacy ? existing.imagePath : null) ??
+        null;
+
+      return tx.toilet.update({
+        where: { id },
+        data: {
+          name: nextName,
+          latitude: nextLat,
+          longitude: nextLng,
+          imagePath: nextCoverImagePath,
+          updatedByEmail: session.email,
+        },
+        select: TOILET_ADMIN_SELECT,
+      });
     });
 
-    if (
-      existing.imagePath &&
-      (newlySavedImagePath !== null || removeImage) &&
-      existing.imagePath !== nextImagePath
-    ) {
-      await deleteUploadByUrl(existing.imagePath).catch(() => {});
+    const pathsToDelete = [
+      ...deletedExistingImages.map((img) => img.imagePath),
+      ...(deleteLegacy && existing.imagePath ? [existing.imagePath] : []),
+    ];
+    if (pathsToDelete.length > 0) {
+      await deleteUploadsByUrls(pathsToDelete);
     }
 
-    return NextResponse.json({ toilet: updated });
+    return NextResponse.json({ toilet: serializeToilet(updated) });
   } catch (err) {
-    if (newlySavedImagePath) {
-      await deleteUploadByUrl(newlySavedImagePath).catch(() => {});
+    if (newlySavedImagePaths.length > 0) {
+      await deleteUploadsByUrls(newlySavedImagePaths);
     }
     console.error("PATCH /api/toilets/[id] failed:", err);
     return NextResponse.json(
@@ -136,7 +216,10 @@ export async function DELETE(
   }
 
   const { id } = await context.params;
-  const existing = await prisma.toilet.findUnique({ where: { id } });
+  const existing = await prisma.toilet.findUnique({
+    where: { id },
+    select: TOILET_ADMIN_SELECT,
+  });
   if (!existing) {
     return NextResponse.json(
       { error: "Data toilet tidak ditemukan." },
@@ -145,9 +228,10 @@ export async function DELETE(
   }
 
   try {
+    const uploadUrls = collectToiletUploadUrls(existing);
     await prisma.toilet.delete({ where: { id } });
-    if (existing.imagePath) {
-      await deleteUploadByUrl(existing.imagePath).catch(() => {});
+    if (uploadUrls.length > 0) {
+      await deleteUploadsByUrls(uploadUrls);
     }
     return NextResponse.json({ ok: true });
   } catch (err) {

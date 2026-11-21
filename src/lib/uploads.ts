@@ -85,7 +85,9 @@ export function getMimeFromUploadFilename(filename: string): string {
   return "image/jpeg";
 }
 
-export async function saveUploadedImage(file: File): Promise<string> {
+export async function validateUploadedImage(
+  file: File
+): Promise<{ buffer: Uint8Array; format: DetectedImageFormat }> {
   if (file.size <= 0) {
     throw new Error("File foto tidak boleh kosong.");
   }
@@ -99,13 +101,46 @@ export async function saveUploadedImage(file: File): Promise<string> {
     throw new Error("Format foto harus berupa JPG, PNG, atau WebP yang valid.");
   }
 
-  const filename = `${crypto.randomUUID()}.${format.ext}`;
+  return { buffer, format };
+}
+
+export async function saveUploadedImage(file: File): Promise<string> {
+  const [url] = await saveUploadedImages([file]);
+  return url;
+}
+
+/**
+ * Validates all images before writing to disk and rolls back any files
+ * already written if an error occurs mid-batch.
+ */
+export async function saveUploadedImages(files: File[]): Promise<string[]> {
+  if (files.length === 0) {
+    return [];
+  }
+
+  const prepared = await Promise.all(
+    files.map((file) => validateUploadedImage(file))
+  );
+
   const uploadDir = getUploadDir();
   await fs.mkdir(uploadDir, { recursive: true });
-  const destination = path.join(/*turbopackIgnore: true*/ uploadDir, filename);
-  await fs.writeFile(destination, buffer);
 
-  return `/api/uploads/${filename}`;
+  const savedUrls: string[] = [];
+  try {
+    for (const { buffer, format } of prepared) {
+      const filename = `${crypto.randomUUID()}.${format.ext}`;
+      const destination = path.join(
+        /*turbopackIgnore: true*/ uploadDir,
+        filename
+      );
+      await fs.writeFile(destination, buffer);
+      savedUrls.push(`/api/uploads/${filename}`);
+    }
+    return savedUrls;
+  } catch (err) {
+    await deleteUploadsByUrls(savedUrls);
+    throw err;
+  }
 }
 
 export async function deleteUploadByUrl(
@@ -131,4 +166,12 @@ export async function deleteUploadByUrl(
       throw err;
     }
   }
+}
+
+export async function deleteUploadsByUrls(
+  imagePaths: Array<string | null | undefined>
+): Promise<void> {
+  await Promise.allSettled(
+    imagePaths.filter(Boolean).map((url) => deleteUploadByUrl(url))
+  );
 }

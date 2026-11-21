@@ -7,6 +7,7 @@ import {
   getVerifiedAdminSession,
   isDevMockLoginEnabled,
 } from "@/lib/auth";
+import { TOILET_ADMIN_SELECT, serializeToilet } from "@/lib/toilets";
 import AdminLoginCard from "@/components/AdminLoginCard";
 import AdminDashboard from "@/components/AdminDashboard";
 
@@ -46,14 +47,7 @@ export default async function HiddenAdminPortalPage({
   const [toilets, dbAdmins] = await Promise.all([
     prisma.toilet.findMany({
       orderBy: [{ createdAt: "desc" }],
-      select: {
-        id: true,
-        name: true,
-        latitude: true,
-        longitude: true,
-        imagePath: true,
-        updatedAt: true,
-      },
+      select: TOILET_ADMIN_SELECT,
     }),
     prisma.admin.findMany({
       orderBy: { createdAt: "desc" },
@@ -70,10 +64,7 @@ export default async function HiddenAdminPortalPage({
   return (
     <AdminDashboard
       currentAdmin={session}
-      initialToilets={toilets.map((t) => ({
-        ...t,
-        updatedAt: t.updatedAt.toISOString(),
-      }))}
+      initialToilets={toilets.map(serializeToilet)}
       initialEnvAdmins={getEnvAdminEmails()}
       initialDbAdmins={dbAdmins.map((a) => ({
         ...a,

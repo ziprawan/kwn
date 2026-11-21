@@ -3,12 +3,20 @@ export interface LatLng {
   lng: number;
 }
 
+export interface ToiletImageItem {
+  id: string;
+  imagePath: string;
+  uploadedByEmail?: string | null;
+  createdAt?: string | Date;
+}
+
 export interface ToiletPoint {
   id: string;
   name: string;
   latitude: number;
   longitude: number;
   imagePath: string | null;
+  images: ToiletImageItem[];
   updatedAt?: string | Date;
 }
 
