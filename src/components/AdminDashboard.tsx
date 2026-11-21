@@ -114,6 +114,7 @@ export default function AdminDashboard({
   } | null>(null);
 
   const createdPreviewUrlsRef = useRef<Set<string>>(new Set());
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const urls = createdPreviewUrlsRef.current;
@@ -225,12 +226,15 @@ export default function AdminDashboard({
 
   const handleFilesChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const incoming = Array.from(event.target.files ?? []);
-    event.target.value = "";
-    if (incoming.length === 0) return;
+    if (incoming.length === 0) {
+      event.target.value = "";
+      return;
+    }
 
     const remainingSlots =
       MAX_IMAGES_PER_TOILET - existingImages.length - draftFiles.length;
     if (remainingSlots <= 0) {
+      event.target.value = "";
       setToiletFeedback({
         type: "error",
         text: `Maksimal ${MAX_IMAGES_PER_TOILET} foto per titik toilet.`,
@@ -238,10 +242,21 @@ export default function AdminDashboard({
       return;
     }
 
+    const allowedMimes = new Set([
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/webp",
+    ]);
     const oversizedNames: string[] = [];
+    const unsupportedNames: string[] = [];
     const validFiles: File[] = [];
     for (const file of incoming) {
       if (file.size <= 0) continue;
+      if (file.type && !allowedMimes.has(file.type.toLowerCase())) {
+        unsupportedNames.push(file.name);
+        continue;
+      }
       if (file.size > MAX_IMAGE_BYTES) {
         oversizedNames.push(file.name);
         continue;
@@ -265,8 +280,19 @@ export default function AdminDashboard({
       setDraftFiles((prev) => [...prev, ...nextItems]);
     }
 
-    if (oversizedNames.length > 0 || exceededLimit) {
+    event.target.value = "";
+
+    if (
+      oversizedNames.length > 0 ||
+      unsupportedNames.length > 0 ||
+      exceededLimit
+    ) {
       const reasons: string[] = [];
+      if (unsupportedNames.length > 0) {
+        reasons.push(
+          `Format harus JPG/PNG/WebP: ${unsupportedNames.slice(0, 3).join(", ")}${unsupportedNames.length > 3 ? "..." : ""}`
+        );
+      }
       if (oversizedNames.length > 0) {
         reasons.push(
           `Ukuran melebihi 5 MB: ${oversizedNames.slice(0, 3).join(", ")}${oversizedNames.length > 3 ? "..." : ""}`
@@ -284,6 +310,11 @@ export default function AdminDashboard({
     } else {
       setToiletFeedback(null);
     }
+  };
+
+  const openPhotoPicker = () => {
+    if (totalPhotoCount >= MAX_IMAGES_PER_TOILET) return;
+    fileInputRef.current?.click();
   };
 
   const handleRemoveDraftFile = (draftId: string) => {
@@ -838,6 +869,18 @@ export default function AdminDashboard({
                           )}
                         </div>
                       ))}
+                      {draftFiles.length === 0 && !isAtPhotoLimit && (
+                        <button
+                          type="button"
+                          onClick={openPhotoPicker}
+                          className="h-28 rounded-xl border-2 border-dashed border-slate-300 hover:border-teal-600 bg-slate-50 hover:bg-teal-50/40 flex flex-col items-center justify-center gap-1.5 text-slate-600 hover:text-teal-800 transition cursor-pointer"
+                        >
+                          <Plus className="h-5 w-5 text-teal-700" />
+                          <span className="text-[11px] font-semibold">
+                            Tambah Foto
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -881,12 +924,38 @@ export default function AdminDashboard({
                           </span>
                         </div>
                       ))}
+                      {!isAtPhotoLimit && (
+                        <button
+                          type="button"
+                          onClick={openPhotoPicker}
+                          className="h-28 rounded-xl border-2 border-dashed border-teal-300 hover:border-teal-600 bg-teal-50/30 hover:bg-teal-50 flex flex-col items-center justify-center gap-1.5 text-teal-800 transition cursor-pointer"
+                        >
+                          <Plus className="h-5 w-5" />
+                          <span className="text-[11px] font-semibold">
+                            Tambah Foto
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
 
-                <label
-                  className={`flex items-center justify-center gap-2 rounded-xl border border-dashed px-4 py-3 text-xs font-semibold transition ${
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  disabled={isAtPhotoLimit}
+                  onChange={handleFilesChange}
+                  tabIndex={-1}
+                  className="hidden"
+                />
+
+                <button
+                  type="button"
+                  onClick={openPhotoPicker}
+                  disabled={isAtPhotoLimit}
+                  className={`w-full flex items-center justify-center gap-2 rounded-xl border border-dashed px-4 py-3 text-xs font-semibold transition ${
                     isAtPhotoLimit
                       ? "border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed"
                       : "border-slate-300 hover:border-teal-600 bg-slate-50 hover:bg-teal-50/40 text-slate-700 cursor-pointer"
@@ -897,18 +966,10 @@ export default function AdminDashboard({
                     {isAtPhotoLimit
                       ? `Batas maksimal ${MAX_IMAGES_PER_TOILET} foto tercapai`
                       : totalPhotoCount > 0
-                        ? "Tambah Foto Lagi (Bisa Pilih > 1)"
+                        ? `Tambah Foto Lagi (${totalPhotoCount}/${MAX_IMAGES_PER_TOILET})`
                         : "Pilih / Ambil Foto Kondisi (Bisa > 1)"}
                   </span>
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    multiple
-                    disabled={isAtPhotoLimit}
-                    onChange={handleFilesChange}
-                    className="hidden"
-                  />
-                </label>
+                </button>
               </div>
 
               <div className="flex items-center gap-2 pt-1">
